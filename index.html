@@ -219,6 +219,18 @@
       color: #666;
     }
 
+    .timestamp {
+      font-size: 12px;
+      color: #666;
+      margin-top: 5px;
+    }
+
+    .log-time {
+      font-family: monospace;
+      font-size: 13px;
+      color: #444;
+    }
+
   </style>
 
 </head>
@@ -256,6 +268,10 @@
       CONNECTING...
 
     </span>
+
+    <div class="timestamp" id="lastUpdateTime">
+      Last Updated: --
+    </div>
 
   </div>
 
@@ -361,6 +377,10 @@
 
         Waiting...
 
+      </div>
+
+      <div class="timestamp" id="lastActionTime">
+        --
       </div>
 
     </div>
@@ -547,6 +567,102 @@
 
 
   // =================================================
+  // TIME FORMAT FUNCTIONS
+  // =================================================
+
+  function formatDate(timestamp) {
+    if (!timestamp) return "--";
+
+    // If timestamp is in milliseconds (from Date.now())
+    // or seconds (from Firebase server timestamp)
+    let date;
+
+    if (typeof timestamp === 'number') {
+      // Check if it's in seconds (10 digits) or milliseconds (13 digits)
+      if (timestamp.toString().length === 10) {
+        date = new Date(timestamp * 1000);
+      } else {
+        date = new Date(timestamp);
+      }
+    } else if (typeof timestamp === 'string') {
+      date = new Date(timestamp);
+    } else {
+      return "--";
+    }
+
+    // Check if date is valid
+    if (isNaN(date.getTime())) {
+      return "--";
+    }
+
+    const options = {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    };
+
+    return date.toLocaleString('en-US', options);
+  }
+
+  function formatTimeAgo(timestamp) {
+    if (!timestamp) return "--";
+
+    let date;
+
+    if (typeof timestamp === 'number') {
+      if (timestamp.toString().length === 10) {
+        date = new Date(timestamp * 1000);
+      } else {
+        date = new Date(timestamp);
+      }
+    } else if (typeof timestamp === 'string') {
+      date = new Date(timestamp);
+    } else {
+      return "--";
+    }
+
+    if (isNaN(date.getTime())) {
+      return "--";
+    }
+
+    const now = new Date();
+    const diffSeconds = Math.floor((now - date) / 1000);
+
+    if (diffSeconds < 60) {
+      return diffSeconds + " seconds ago";
+    } else if (diffSeconds < 3600) {
+      const minutes = Math.floor(diffSeconds / 60);
+      return minutes + " minute" + (minutes > 1 ? "s" : "") + " ago";
+    } else if (diffSeconds < 86400) {
+      const hours = Math.floor(diffSeconds / 3600);
+      return hours + " hour" + (hours > 1 ? "s" : "") + " ago";
+    } else if (diffSeconds < 604800) {
+      const days = Math.floor(diffSeconds / 86400);
+      return days + " day" + (days > 1 ? "s" : "") + " ago";
+    } else {
+      return formatDate(timestamp);
+    }
+  }
+
+  // =================================================
+  // UPDATE TIMESTAMP DISPLAY
+  // =================================================
+
+  function updateLastUpdateTime() {
+    const element = document.getElementById("lastUpdateTime");
+    element.textContent = "Last Updated: " + formatDate(Date.now());
+  }
+
+  // Update the timestamp every minute
+  setInterval(updateLastUpdateTime, 60000);
+  updateLastUpdateTime();
+
+
+  // =================================================
   // CONNECTION
   // =================================================
 
@@ -586,6 +702,8 @@
           "offline";
 
       }
+
+      updateLastUpdateTime();
 
     }
   );
@@ -635,6 +753,8 @@
 
       }
 
+      updateLastUpdateTime();
+
     }
   );
 
@@ -683,6 +803,8 @@
 
       }
 
+      updateLastUpdateTime();
+
     }
   );
 
@@ -715,6 +837,8 @@
         "wrongAttempts"
       ).innerText =
         value + " / 3";
+
+      updateLastUpdateTime();
 
     }
   );
@@ -764,6 +888,8 @@
 
       }
 
+      updateLastUpdateTime();
+
     }
   );
 
@@ -796,6 +922,8 @@
 
       }
 
+      updateLastUpdateTime();
+
     }
   );
 
@@ -827,6 +955,8 @@
           value;
 
       }
+
+      updateLastUpdateTime();
 
     }
   );
@@ -878,6 +1008,7 @@
 
       `;
 
+      updateLastUpdateTime();
       return;
 
     }
@@ -886,11 +1017,18 @@
     const entries =
       Object.entries(data);
 
+    // Filter out LastAction if it exists
+    const filteredEntries = entries.filter(([key]) => key !== "LastAction");
 
-    entries.reverse();
+    // Sort by time or key (newest first)
+    filteredEntries.sort((a, b) => {
+      const timeA = a[1].Time || 0;
+      const timeB = b[1].Time || 0;
+      return timeB - timeA;
+    });
 
 
-    entries.forEach(
+    filteredEntries.forEach(
       ([key, log], index) => {
 
         if (
@@ -934,11 +1072,17 @@
 
         }
 
+        // Format the time
+        const formattedTime = log.Time ? formatDate(log.Time) : "--";
+
+        // Also show relative time in a smaller font
+        const relativeTime = log.Time ? formatTimeAgo(log.Time) : "";
+
 
         row.innerHTML = `
 
           <td>
-            ${entries.length - index}
+            ${index + 1}
           </td>
 
           <td class="${typeClass}">
@@ -949,8 +1093,9 @@
             ${log.Type || "--"}
           </td>
 
-          <td>
-            ${formatTime(log.Time)}
+          <td class="log-time">
+            ${formattedTime}
+            ${relativeTime ? `<br><small style="color:#888;font-size:10px;">${relativeTime}</small>` : ''}
           </td>
 
         `;
@@ -959,6 +1104,8 @@
         table.appendChild(
           row
         );
+
+        updateLastUpdateTime();
 
       }
     );
@@ -970,25 +1117,6 @@
     logsRef,
     loadLogs
   );
-
-
-  // =================================================
-  // TIME FORMAT
-  // =================================================
-
-  function formatTime(value)
-  {
-
-    if (!value)
-      return "--";
-
-
-    // ESP32 millis()
-    // is not actual date/time
-
-    return value + " ms";
-
-  }
 
 
   // =================================================
@@ -1046,10 +1174,7 @@
           );
 
 
-          // IMPORTANT:
-          // This changes Firebase password only.
-          // ESP32 must read it to apply it.
-
+          // Log the password change with proper timestamp
           const newLogRef =
             push(
               ref(
@@ -1075,15 +1200,26 @@
             }
           );
 
+          // Update LastAction
+          await set(
+            ref(
+              database,
+              "Logs/LastAction"
+            ),
+            "PASSWORD CHANGED FROM WEB"
+          );
+
 
           message.innerText =
-            "Password updated successfully.";
+            "Password updated successfully ✓";
 
           message.style.color =
             "green";
 
 
           input.value = "";
+
+          updateLastUpdateTime();
 
         }
 
@@ -1129,13 +1265,31 @@
 
         try {
 
+          // Keep LastAction
+          const lastActionRef = ref(database, "Logs/LastAction");
+          let lastAction = "";
+
+          // Get current last action before clearing
+          await onValue(lastActionRef, (snapshot) => {
+            if (snapshot.val()) {
+              lastAction = snapshot.val();
+            }
+          }, { onlyOnce: true });
+
           await remove(
             logsRef
           );
 
+          // Restore LastAction
+          if (lastAction) {
+            await set(lastActionRef, lastAction);
+          }
+
           alert(
-            "All logs cleared."
+            "All logs cleared ✓"
           );
+
+          updateLastUpdateTime();
 
         }
 
