@@ -162,7 +162,7 @@
     }
 
     .relay-log {
-      color: green;
+      color: #059669;
       font-weight: bold;
     }
 
@@ -185,9 +185,17 @@
       color: white;
     }
 
+    .clear-btn:hover {
+      background: #b91c1c;
+    }
+
     .change-btn {
       background: #2563eb;
       color: white;
+    }
+
+    .change-btn:hover {
+      background: #1d4ed8;
     }
 
     .refresh-btn {
@@ -195,8 +203,12 @@
       color: white;
     }
 
+    .refresh-btn:hover {
+      background: #15803d;
+    }
+
     button:hover {
-      opacity: 0.85;
+      opacity: 0.9;
     }
 
     .password-box {
@@ -211,11 +223,30 @@
       border: 1px solid #bbb;
       border-radius: 8px;
       font-size: 16px;
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .password-box input:focus {
+      outline: 2px solid #2563eb;
+      border-color: transparent;
     }
 
     .message {
       margin-top: 12px;
       font-weight: bold;
+      padding: 8px;
+      border-radius: 6px;
+    }
+
+    .message.success {
+      color: #16a34a;
+      background: #f0fdf4;
+    }
+
+    .message.error {
+      color: #dc2626;
+      background: #fef2f2;
     }
 
     footer {
@@ -234,11 +265,6 @@
       font-family: monospace;
       font-size: 13px;
       color: #444;
-    }
-
-    .log-time-small {
-      font-size: 10px;
-      color: #888;
     }
 
     .time-badge {
@@ -262,8 +288,9 @@
     }
 
     .no-time {
-      color: #9ca3af;
+      color: #ef4444;
       font-style: italic;
+      font-weight: 500;
     }
 
     .log-count {
@@ -271,6 +298,44 @@
       color: #666;
       margin-left: 10px;
       font-weight: normal;
+    }
+
+    .refresh-indicator {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-left: 10px;
+    }
+
+    .refresh-indicator.live {
+      background: #22c55e;
+      animation: pulse 2s infinite;
+    }
+
+    .refresh-indicator.updating {
+      background: #eab308;
+      animation: pulse 0.5s infinite;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
+
+    .log-entry {
+      transition: background 0.3s;
+    }
+
+    .log-entry.new {
+      background: #f0fdf4;
+      animation: fadeIn 0.5s;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
   </style>
@@ -310,6 +375,8 @@
       CONNECTING...
 
     </span>
+
+    <span class="refresh-indicator live" id="statusIndicator"></span>
 
     <div class="timestamp" id="lastUpdateTime">
       Last Updated: --
@@ -441,7 +508,7 @@
       <input
         type="password"
         id="newPassword"
-        placeholder="Enter new password"
+        placeholder="Enter new password (min 4 characters)"
         maxlength="10"
       >
 
@@ -473,7 +540,7 @@
       class="refresh-btn"
       id="refreshBtn">
 
-      REFRESH
+      🔄 REFRESH
 
     </button>
 
@@ -481,10 +548,13 @@
       class="clear-btn"
       id="clearLogBtn">
 
-      CLEAR LOG
+      🗑️ CLEAR LOG
 
     </button>
 
+    <p style="font-size: 12px; color: #888; margin-top: 8px;">
+      ⏱️ ESP32 logs show uptime (since boot). Web logs show actual date/time.
+    </p>
 
     <div class="table-container">
 
@@ -494,11 +564,11 @@
 
           <tr>
 
-            <th>#</th>
+            <th style="width: 50px;">#</th>
 
             <th>Action</th>
 
-            <th>Type</th>
+            <th style="width: 100px;">Type</th>
 
             <th>Time</th>
 
@@ -510,8 +580,8 @@
 
           <tr>
 
-            <td colspan="4" style="text-align:center; padding: 30px;">
-              Loading logs...
+            <td colspan="4" style="text-align:center; padding: 30px; color: #9ca3af;">
+              📭 Loading logs...
             </td>
 
           </tr>
@@ -558,7 +628,8 @@
     onValue,
     set,
     remove,
-    push
+    push,
+    serverTimestamp
   }
   from
   "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
@@ -612,15 +683,23 @@
   // TIME FORMAT FUNCTIONS
   // =================================================
 
-  // Check if a timestamp is ESP32 millis() (small number indicating uptime)
-  function isEsp32Millis(timestamp) {
-    if (typeof timestamp !== 'number') return false;
-    // ESP32 millis() typically starts from 0 and grows
-    // If it's less than 100,000,000 (about 1.15 days) and 
-    // the year would be 1970 if treated as a timestamp, it's likely millis()
-    if (timestamp < 100000000) {
-      // Check if it's a valid date (would be 1970)
-      const testDate = new Date(timestamp);
+  function isEsp32Millis(value) {
+    if (typeof value === 'string') {
+      // Try to parse as number
+      const num = parseFloat(value);
+      if (!isNaN(num)) {
+        value = num;
+      } else {
+        return false;
+      }
+    }
+    
+    if (typeof value !== 'number') return false;
+    
+    // ESP32 millis() is typically < 100,000,000 (about 1.15 days)
+    // and would be year 1970 if treated as timestamp
+    if (value > 0 && value < 100000000) {
+      const testDate = new Date(value);
       if (testDate.getFullYear() === 1970) {
         return true;
       }
@@ -628,7 +707,6 @@
     return false;
   }
 
-  // Format ESP32 millis() to readable uptime
   function formatUptime(millis) {
     if (!millis || typeof millis !== 'number') return "--";
     
@@ -646,7 +724,6 @@
     return parts.join(" ");
   }
 
-  // Format real timestamp to readable date/time
   function formatRealTime(timestamp) {
     if (!timestamp) return "--";
 
@@ -659,7 +736,17 @@
         date = new Date(timestamp);
       }
     } else if (typeof timestamp === 'string') {
-      date = new Date(timestamp);
+      // Try to parse as number first
+      const num = parseFloat(timestamp);
+      if (!isNaN(num)) {
+        if (num.toString().length === 10) {
+          date = new Date(num * 1000);
+        } else {
+          date = new Date(num);
+        }
+      } else {
+        date = new Date(timestamp);
+      }
     } else {
       return "--";
     }
@@ -681,7 +768,6 @@
     return date.toLocaleString('en-US', options);
   }
 
-  // Format time with relative info
   function formatTimeAgo(timestamp) {
     if (!timestamp) return "";
 
@@ -693,7 +779,16 @@
         date = new Date(timestamp);
       }
     } else if (typeof timestamp === 'string') {
-      date = new Date(timestamp);
+      const num = parseFloat(timestamp);
+      if (!isNaN(num)) {
+        if (num.toString().length === 10) {
+          date = new Date(num * 1000);
+        } else {
+          date = new Date(num);
+        }
+      } else {
+        date = new Date(timestamp);
+      }
     } else {
       return "";
     }
@@ -723,31 +818,45 @@
     }
   }
 
-  // Main time formatting function for logs
   function formatLogTime(timeValue) {
-    if (!timeValue && timeValue !== 0) {
-      return `<span class="no-time">No timestamp</span>`;
+    // Handle null, undefined, or missing time
+    if (timeValue === null || timeValue === undefined) {
+      return `<span class="no-time">⏱️ Uptime: --</span>`;
+    }
+
+    // Try to parse if it's a string
+    let parsedValue = timeValue;
+    if (typeof timeValue === 'string') {
+      const num = parseFloat(timeValue);
+      if (!isNaN(num)) {
+        parsedValue = num;
+      }
     }
 
     // Check if it's ESP32 millis()
-    if (isEsp32Millis(timeValue)) {
-      const uptime = formatUptime(timeValue);
-      return `<span class="esp-time">⏱ ${uptime}</span>`;
+    if (isEsp32Millis(parsedValue)) {
+      const uptime = formatUptime(parsedValue);
+      return `<span class="esp-time">⏱️ ${uptime} (since boot)</span>`;
     }
 
-    // Real timestamp
-    const formatted = formatRealTime(timeValue);
-    if (formatted === "--") {
-      return `<span class="no-time">Invalid time</span>`;
+    // Try as real timestamp
+    const formatted = formatRealTime(parsedValue);
+    if (formatted !== "--") {
+      const relative = formatTimeAgo(parsedValue);
+      let relativeHtml = '';
+      if (relative) {
+        relativeHtml = `<br><span class="time-badge">${relative}</span>`;
+      }
+      return `<span class="real-time">📅 ${formatted}</span>${relativeHtml}`;
     }
 
-    const relative = formatTimeAgo(timeValue);
-    let relativeHtml = '';
-    if (relative) {
-      relativeHtml = `<br><span class="time-badge">${relative}</span>`;
+    // If we have a number but it's not a valid timestamp or millis
+    if (typeof parsedValue === 'number') {
+      return `<span class="esp-time">⏱️ ${parsedValue}ms (since boot)</span>`;
     }
 
-    return `<span class="real-time">${formatted}</span>${relativeHtml}`;
+    // Fallback
+    return `<span class="no-time">⏱️ Uptime: --</span>`;
   }
 
 
@@ -760,337 +869,153 @@
     element.textContent = "Last Updated: " + formatRealTime(Date.now());
   }
 
-  // Update every 10 seconds
   setInterval(updateLastUpdateTime, 10000);
   updateLastUpdateTime();
 
 
   // =================================================
-  // CONNECTION
+  // CONNECTION STATUS
   // =================================================
 
-  const connectionRef =
-    ref(
-      database,
-      ".info/connected"
-    );
+  const connectionRef = ref(database, ".info/connected");
 
+  onValue(connectionRef, (snapshot) => {
+    const element = document.getElementById("connectionStatus");
+    const indicator = document.getElementById("statusIndicator");
 
-  onValue(
-    connectionRef,
-    (snapshot) => {
-
-      const element =
-        document.getElementById(
-          "connectionStatus"
-        );
-
-
-      if (snapshot.val() === true) {
-
-        element.innerText =
-          "ONLINE";
-
-        element.className =
-          "online";
-
-      }
-
-      else {
-
-        element.innerText =
-          "OFFLINE";
-
-        element.className =
-          "offline";
-
-      }
-
-      updateLastUpdateTime();
-
+    if (snapshot.val() === true) {
+      element.innerText = "ONLINE";
+      element.className = "online";
+      indicator.className = "refresh-indicator live";
+    } else {
+      element.innerText = "OFFLINE";
+      element.className = "offline";
+      indicator.className = "refresh-indicator";
     }
-  );
+    updateLastUpdateTime();
+  });
 
 
   // =================================================
-  // RELAY
+  // RELAY STATUS
   // =================================================
 
-  const relayRef =
-    ref(
-      database,
-      "Relay/Status"
-    );
+  const relayRef = ref(database, "Relay/Status");
 
+  onValue(relayRef, (snapshot) => {
+    const value = snapshot.val();
+    const element = document.getElementById("relayStatus");
 
-  onValue(
-    relayRef,
-    (snapshot) => {
-
-      const value =
-        snapshot.val();
-
-      const element =
-        document.getElementById(
-          "relayStatus"
-        );
-
-
-      if (value == 1) {
-
-        element.innerText =
-          "ON";
-
-        element.className =
-          "status on";
-
-      }
-
-      else {
-
-        element.innerText =
-          "OFF";
-
-        element.className =
-          "status off";
-
-      }
-
-      updateLastUpdateTime();
-
+    if (value == 1) {
+      element.innerText = "ON";
+      element.className = "status on";
+    } else {
+      element.innerText = "OFF";
+      element.className = "status off";
     }
-  );
+    updateLastUpdateTime();
+  });
 
 
   // =================================================
   // SYSTEM LOCK
   // =================================================
 
-  const lockRef =
-    ref(
-      database,
-      "System/Locked"
-    );
+  const lockRef = ref(database, "System/Locked");
 
+  onValue(lockRef, (snapshot) => {
+    const value = snapshot.val();
+    const element = document.getElementById("systemStatus");
 
-  onValue(
-    lockRef,
-    (snapshot) => {
-
-      const value =
-        snapshot.val();
-
-      const element =
-        document.getElementById(
-          "systemStatus"
-        );
-
-
-      if (value == 1) {
-
-        element.innerText =
-          "LOCKED";
-
-        element.className =
-          "status locked";
-
-      }
-
-      else {
-
-        element.innerText =
-          "UNLOCKED";
-
-        element.className =
-          "status unlocked";
-
-      }
-
-      updateLastUpdateTime();
-
+    if (value == 1) {
+      element.innerText = "LOCKED";
+      element.className = "status locked";
+    } else {
+      element.innerText = "UNLOCKED";
+      element.className = "status unlocked";
     }
-  );
+    updateLastUpdateTime();
+  });
 
 
   // =================================================
   // WRONG ATTEMPTS
   // =================================================
 
-  const attemptsRef =
-    ref(
-      database,
-      "System/WrongAttempts"
-    );
+  const attemptsRef = ref(database, "System/WrongAttempts");
 
-
-  onValue(
-    attemptsRef,
-    (snapshot) => {
-
-      let value =
-        snapshot.val();
-
-      if (
-        value === null
-      ) {
-        value = 0;
-      }
-
-      document.getElementById(
-        "wrongAttempts"
-      ).innerText =
-        value + " / 3";
-
-      updateLastUpdateTime();
-
-    }
-  );
+  onValue(attemptsRef, (snapshot) => {
+    let value = snapshot.val();
+    if (value === null) value = 0;
+    document.getElementById("wrongAttempts").innerText = value + " / 3";
+    updateLastUpdateTime();
+  });
 
 
   // =================================================
   // BUZZER
   // =================================================
 
-  const buzzerRef =
-    ref(
-      database,
-      "Alert/Buzzer"
-    );
+  const buzzerRef = ref(database, "Alert/Buzzer");
 
+  onValue(buzzerRef, (snapshot) => {
+    const value = snapshot.val();
+    const element = document.getElementById("buzzerStatus");
 
-  onValue(
-    buzzerRef,
-    (snapshot) => {
-
-      const value =
-        snapshot.val();
-
-      const element =
-        document.getElementById(
-          "buzzerStatus"
-        );
-
-
-      if (value == 1) {
-
-        element.innerText =
-          "ACTIVE";
-
-        element.className =
-          "status warning";
-
-      }
-
-      else {
-
-        element.innerText =
-          "OFF";
-
-        element.className =
-          "status off";
-
-      }
-
-      updateLastUpdateTime();
-
+    if (value == 1) {
+      element.innerText = "ACTIVE";
+      element.className = "status warning";
+    } else {
+      element.innerText = "OFF";
+      element.className = "status off";
     }
-  );
+    updateLastUpdateTime();
+  });
 
 
   // =================================================
   // CURRENT PASSWORD
   // =================================================
 
-  const passwordRef =
-    ref(
-      database,
-      "System/Password"
-    );
+  const passwordRef = ref(database, "System/Password");
 
-
-  onValue(
-    passwordRef,
-    (snapshot) => {
-
-      const value =
-        snapshot.val();
-
-
-      if (value) {
-
-        document.getElementById(
-          "currentPassword"
-        ).innerText =
-          value;
-
-      }
-
-      updateLastUpdateTime();
-
+  onValue(passwordRef, (snapshot) => {
+    const value = snapshot.val();
+    if (value) {
+      document.getElementById("currentPassword").innerText = value;
     }
-  );
+    updateLastUpdateTime();
+  });
 
 
   // =================================================
   // LAST ACTION
   // =================================================
 
-  const actionRef =
-    ref(
-      database,
-      "Logs/LastAction"
-    );
+  const actionRef = ref(database, "Logs/LastAction");
 
-
-  onValue(
-    actionRef,
-    (snapshot) => {
-
-      const value =
-        snapshot.val();
-
-
-      if (value) {
-
-        document.getElementById(
-          "lastAction"
-        ).innerText =
-          value;
-
-      }
-
-      updateLastUpdateTime();
-
+  onValue(actionRef, (snapshot) => {
+    const value = snapshot.val();
+    if (value) {
+      document.getElementById("lastAction").innerText = value;
     }
-  );
+    updateLastUpdateTime();
+  });
 
 
   // =================================================
   // DATA LOG - MAIN FUNCTION
   // =================================================
 
-  const logsRef =
-    ref(
-      database,
-      "Logs"
-    );
+  const logsRef = ref(database, "Logs");
+  let previousLogKeys = new Set();
 
   function loadLogs(snapshot) {
-
-    const table =
-      document.getElementById(
-        "logTable"
-      );
-
-    const logCount =
-      document.getElementById(
-        "logCount"
-      );
+    const table = document.getElementById("logTable");
+    const logCount = document.getElementById("logCount");
 
     table.innerHTML = "";
-
-    const data =
-      snapshot.val();
+    const data = snapshot.val();
 
     if (!data) {
       table.innerHTML = `
@@ -1105,13 +1030,9 @@
       return;
     }
 
-    const entries =
-      Object.entries(data);
+    const entries = Object.entries(data).filter(([key]) => key !== "LastAction");
 
-    // Filter out LastAction
-    const filteredEntries = entries.filter(([key]) => key !== "LastAction");
-
-    if (filteredEntries.length === 0) {
+    if (entries.length === 0) {
       table.innerHTML = `
         <tr>
           <td colspan="4" style="text-align:center; padding: 30px; color: #9ca3af;">
@@ -1125,312 +1046,183 @@
     }
 
     // Sort by time (newest first)
-    filteredEntries.sort((a, b) => {
-      const timeA = a[1].Time || 0;
-      const timeB = b[1].Time || 0;
+    entries.sort((a, b) => {
+      const timeA = a[1]?.Time || 0;
+      const timeB = b[1]?.Time || 0;
       
-      // If both have time values, sort by them
       if (timeA && timeB) {
-        return timeB - timeA;
+        // If both are numbers, compare them
+        if (typeof timeA === 'number' && typeof timeB === 'number') {
+          return timeB - timeA;
+        }
+        // Try string comparison
+        return String(timeB).localeCompare(String(timeA));
       }
-      
-      // If one has time, prioritize it
       if (timeA) return -1;
       if (timeB) return 1;
-      
-      // Otherwise sort by key
       return b[0].localeCompare(a[0]);
     });
 
+    // Check for new entries
+    const currentKeys = new Set(entries.map(([key]) => key));
+    const newKeys = new Set([...currentKeys].filter(x => !previousLogKeys.has(x)));
+    previousLogKeys = currentKeys;
+
     // Display all logs
-    filteredEntries.forEach(
-      ([key, log], index) => {
+    entries.forEach(([key, log], index) => {
+      if (typeof log !== "object" || !log) return;
 
-        if (typeof log !== "object" || !log) {
-          return;
-        }
-
-        const row = document.createElement("tr");
-
-        let typeClass = "";
-        if (log.Type === "RELAY") {
-          typeClass = "relay-log";
-        } else if (log.Type === "SECURITY") {
-          typeClass = "security";
-        } else {
-          typeClass = "system-log";
-        }
-
-        // Get the time value
-        const timeValue = log.Time;
-        
-        // Format the time
-        let timeHtml = "";
-        if (timeValue !== undefined && timeValue !== null) {
-          timeHtml = formatLogTime(timeValue);
-        } else {
-          timeHtml = `<span class="no-time">No timestamp</span>`;
-        }
-
-        // Get action with fallback
-        const actionText = log.Action || "--";
-
-        // Get type with fallback
-        const typeText = log.Type || "--";
-
-        row.innerHTML = `
-          <td style="text-align:center;">${index + 1}</td>
-          <td class="${typeClass}">${actionText}</td>
-          <td>${typeText}</td>
-          <td class="log-time">${timeHtml}</td>
-        `;
-
-        table.appendChild(row);
+      const row = document.createElement("tr");
+      row.className = "log-entry";
+      if (newKeys.has(key)) {
+        row.classList.add("new");
       }
-    );
 
-    logCount.textContent = `(${filteredEntries.length} entries)`;
+      let typeClass = "";
+      if (log.Type === "RELAY") typeClass = "relay-log";
+      else if (log.Type === "SECURITY") typeClass = "security";
+      else typeClass = "system-log";
+
+      // Get the time value - check all possible field names
+      let timeValue = log.Time || log.timestamp || log.time || log.Timestamp;
+      
+      // If timeValue is a string like "Time" (from ESP32), try to parse
+      if (typeof timeValue === 'string' && timeValue.toLowerCase() === 'time') {
+        timeValue = null;
+      }
+
+      // Format the time
+      let timeHtml = formatLogTime(timeValue);
+
+      const actionText = log.Action || log.action || "--";
+      const typeText = log.Type || log.type || "--";
+
+      row.innerHTML = `
+        <td style="text-align:center;">${index + 1}</td>
+        <td class="${typeClass}">${actionText}</td>
+        <td>${typeText}</td>
+        <td class="log-time">${timeHtml}</td>
+      `;
+
+      table.appendChild(row);
+    });
+
+    logCount.textContent = `(${entries.length} entries)`;
     updateLastUpdateTime();
 
     // Update last action time
-    if (filteredEntries.length > 0) {
-      const firstLog = filteredEntries[0][1];
-      if (firstLog && firstLog.Time) {
+    if (entries.length > 0) {
+      const firstLog = entries[0][1];
+      if (firstLog) {
+        const timeValue = firstLog.Time || firstLog.timestamp || firstLog.time;
         const lastActionTimeEl = document.getElementById("lastActionTime");
-        if (!isEsp32Millis(firstLog.Time)) {
-          const formatted = formatRealTime(firstLog.Time);
-          const relative = formatTimeAgo(firstLog.Time);
+        
+        if (timeValue && !isEsp32Millis(timeValue)) {
+          const formatted = formatRealTime(timeValue);
+          const relative = formatTimeAgo(timeValue);
           if (relative) {
             lastActionTimeEl.textContent = `Last log: ${formatted} (${relative})`;
           } else {
             lastActionTimeEl.textContent = `Last log: ${formatted}`;
           }
+        } else if (timeValue) {
+          lastActionTimeEl.textContent = `Last log: ${formatUptime(timeValue)} (since boot)`;
         } else {
-          lastActionTimeEl.textContent = `Last log: ${formatUptime(firstLog.Time)} (since boot)`;
+          lastActionTimeEl.textContent = `Last log: No timestamp`;
         }
       }
     }
   }
 
 
-  onValue(
-    logsRef,
-    loadLogs
-  );
+  onValue(logsRef, loadLogs);
 
 
   // =================================================
-  // CHANGE PASSWORD FROM WEB
+  // CHANGE PASSWORD
   // =================================================
 
-  document
-    .getElementById(
-      "changePasswordBtn"
-    )
-    .addEventListener(
-      "click",
-      async () => {
+  document.getElementById("changePasswordBtn").addEventListener("click", async () => {
+    const input = document.getElementById("newPassword");
+    const message = document.getElementById("passwordMessage");
+    const newPassword = input.value.trim();
 
-        const input =
-          document.getElementById(
-            "newPassword"
-          );
+    if (newPassword.length < 4) {
+      message.className = "message error";
+      message.innerText = "❌ Password must be at least 4 characters.";
+      return;
+    }
 
+    try {
+      await set(ref(database, "System/Password"), newPassword);
 
-        const message =
-          document.getElementById(
-            "passwordMessage"
-          );
+      const newLogRef = push(ref(database, "Logs"));
+      await set(newLogRef, {
+        Action: "PASSWORD CHANGED FROM WEB",
+        Type: "SECURITY",
+        Time: Date.now()
+      });
 
+      await set(ref(database, "Logs/LastAction"), "PASSWORD CHANGED FROM WEB");
 
-        const newPassword =
-          input.value.trim();
+      message.className = "message success";
+      message.innerText = "✅ Password updated successfully!";
+      input.value = "";
 
+      setTimeout(() => {
+        message.className = "message";
+        message.innerText = "";
+      }, 5000);
 
-        if (
-          newPassword.length < 4
-        )
-        {
+      updateLastUpdateTime();
 
-          message.innerText =
-            "Password must be at least 4 characters.";
-
-          message.style.color =
-            "red";
-
-          return;
-
-        }
-
-
-        try {
-
-          await set(
-            ref(
-              database,
-              "System/Password"
-            ),
-            newPassword
-          );
-
-
-          // Log with proper timestamp
-          const newLogRef =
-            push(
-              ref(
-                database,
-                "Logs"
-              )
-            );
-
-
-          await set(
-            newLogRef,
-            {
-
-              Action:
-                "PASSWORD CHANGED FROM WEB",
-
-              Type:
-                "SECURITY",
-
-              Time:
-                Date.now()
-
-            }
-          );
-
-          // Update LastAction
-          await set(
-            ref(
-              database,
-              "Logs/LastAction"
-            ),
-            "PASSWORD CHANGED FROM WEB"
-          );
-
-
-          message.innerText =
-            "✅ Password updated successfully!";
-
-          message.style.color =
-            "green";
-
-
-          input.value = "";
-
-          setTimeout(() => {
-            message.innerText = "";
-          }, 5000);
-
-          updateLastUpdateTime();
-
-        }
-
-        catch(error)
-        {
-
-          console.error(error);
-
-          message.innerText =
-            "❌ Password update failed: "
-            + error.message;
-
-          message.style.color =
-            "red";
-
-        }
-
-      }
-    );
+    } catch (error) {
+      console.error(error);
+      message.className = "message error";
+      message.innerText = "❌ Password update failed: " + error.message;
+    }
+  });
 
 
   // =================================================
   // CLEAR LOG
   // =================================================
 
-  document
-    .getElementById(
-      "clearLogBtn"
-    )
-    .addEventListener(
-      "click",
-      async () => {
+  document.getElementById("clearLogBtn").addEventListener("click", async () => {
+    if (!confirm("⚠️ Delete all system logs?")) return;
 
-        const confirmClear =
-          confirm(
-            "⚠️ Delete all system logs?"
-          );
+    try {
+      const lastActionRef = ref(database, "Logs/LastAction");
+      let lastAction = "";
 
+      const snapshot = await new Promise((resolve) => {
+        onValue(lastActionRef, (snap) => resolve(snap), { onlyOnce: true });
+      });
 
-        if (!confirmClear)
-          return;
+      if (snapshot.val()) lastAction = snapshot.val();
 
+      await remove(logsRef);
 
-        try {
-
-          // Keep LastAction
-          const lastActionRef = ref(database, "Logs/LastAction");
-          let lastAction = "";
-
-          // Get current last action before clearing
-          const snapshot = await new Promise((resolve) => {
-            onValue(lastActionRef, (snap) => {
-              resolve(snap);
-            }, { onlyOnce: true });
-          });
-
-          if (snapshot.val()) {
-            lastAction = snapshot.val();
-          }
-
-          await remove(
-            logsRef
-          );
-
-          // Restore LastAction
-          if (lastAction) {
-            await set(lastActionRef, lastAction);
-          }
-
-          alert(
-            "✅ All logs cleared!"
-          );
-
-          updateLastUpdateTime();
-
-        }
-
-        catch(error)
-        {
-
-          alert(
-            "❌ Unable to clear logs: "
-            + error.message
-          );
-
-        }
-
+      if (lastAction) {
+        await set(lastActionRef, lastAction);
       }
-    );
+
+      alert("✅ All logs cleared!");
+      updateLastUpdateTime();
+
+    } catch (error) {
+      alert("❌ Unable to clear logs: " + error.message);
+    }
+  });
 
 
   // =================================================
   // REFRESH
   // =================================================
 
-  document
-    .getElementById(
-      "refreshBtn"
-    )
-    .addEventListener(
-      "click",
-      () => {
-
-        location.reload();
-
-      }
-    );
+  document.getElementById("refreshBtn").addEventListener("click", () => {
+    location.reload();
+  });
 
 </script>
 
