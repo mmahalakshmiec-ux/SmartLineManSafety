@@ -231,6 +231,21 @@
       color: #444;
     }
 
+    .log-time-small {
+      font-size: 10px;
+      color: #888;
+    }
+
+    .time-badge {
+      background: #f0f0f0;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      color: #555;
+      display: inline-block;
+      margin-top: 2px;
+    }
+
   </style>
 
 </head>
@@ -516,7 +531,8 @@
     onValue,
     set,
     remove,
-    push
+    push,
+    serverTimestamp
   }
   from
   "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
@@ -573,8 +589,6 @@
   function formatDate(timestamp) {
     if (!timestamp) return "--";
 
-    // If timestamp is in milliseconds (from Date.now())
-    // or seconds (from Firebase server timestamp)
     let date;
 
     if (typeof timestamp === 'number') {
@@ -590,7 +604,6 @@
       return "--";
     }
 
-    // Check if date is valid
     if (isNaN(date.getTime())) {
       return "--";
     }
@@ -632,20 +645,75 @@
     const now = new Date();
     const diffSeconds = Math.floor((now - date) / 1000);
 
-    if (diffSeconds < 60) {
-      return diffSeconds + " seconds ago";
+    if (diffSeconds < 5) {
+      return "Just now";
+    } else if (diffSeconds < 60) {
+      return diffSeconds + "s ago";
     } else if (diffSeconds < 3600) {
       const minutes = Math.floor(diffSeconds / 60);
-      return minutes + " minute" + (minutes > 1 ? "s" : "") + " ago";
+      return minutes + "m ago";
     } else if (diffSeconds < 86400) {
       const hours = Math.floor(diffSeconds / 3600);
-      return hours + " hour" + (hours > 1 ? "s" : "") + " ago";
+      return hours + "h ago";
     } else if (diffSeconds < 604800) {
       const days = Math.floor(diffSeconds / 86400);
-      return days + " day" + (days > 1 ? "s" : "") + " ago";
+      return days + "d ago";
     } else {
       return formatDate(timestamp);
     }
+  }
+
+  // Check if a timestamp is ESP32 millis() (small number)
+  function isEsp32Millis(timestamp) {
+    if (typeof timestamp !== 'number') return false;
+    // ESP32 millis() typically starts from 0 and grows
+    // If it's less than 100,000,000 (about 1.15 days) and 
+    // the year would be 1970 if treated as a timestamp, it's likely millis()
+    if (timestamp < 100000000) {
+      // Check if it's a valid date (would be 1970)
+      const testDate = new Date(timestamp);
+      if (testDate.getFullYear() === 1970) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function formatLogTime(timestamp) {
+    if (!timestamp) return "--";
+
+    // Check if it's ESP32 millis()
+    if (isEsp32Millis(timestamp)) {
+      // Convert millis to readable format
+      const seconds = Math.floor(timestamp / 1000);
+      const minutes = Math.floor(seconds / 60);
+      const hours = Math.floor(minutes / 60);
+      const days = Math.floor(hours / 24);
+
+      let result = "";
+      if (days > 0) result += days + "d ";
+      if (hours % 24 > 0) result += (hours % 24) + "h ";
+      if (minutes % 60 > 0) result += (minutes % 60) + "m ";
+      result += (seconds % 60) + "s";
+
+      return "⏱ " + result + " (since boot)";
+    }
+
+    // Normal timestamp
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return "--";
+
+    const options = {
+      month: '2-digit',
+      day: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    };
+
+    return date.toLocaleString('en-US', options);
   }
 
   // =================================================
@@ -657,8 +725,8 @@
     element.textContent = "Last Updated: " + formatDate(Date.now());
   }
 
-  // Update the timestamp every minute
-  setInterval(updateLastUpdateTime, 60000);
+  // Update the timestamp every 10 seconds
+  setInterval(updateLastUpdateTime, 10000);
   updateLastUpdateTime();
 
 
@@ -972,6 +1040,8 @@
       "Logs"
     );
 
+  // Store the latest log entry time for reference
+  let latestLogTime = 0;
 
   function loadLogs(snapshot)
   {
@@ -1017,18 +1087,39 @@
     const entries =
       Object.entries(data);
 
-    // Filter out LastAction if it exists
+    // Filter out LastAction
     const filteredEntries = entries.filter(([key]) => key !== "LastAction");
 
-    // Sort by time or key (newest first)
+    // Sort by key (assuming Firebase push keys are chronological)
     filteredEntries.sort((a, b) => {
+      // Try to sort by Time field first
       const timeA = a[1].Time || 0;
       const timeB = b[1].Time || 0;
-      return timeB - timeA;
+      
+      // If both have time values, sort by them
+      if (timeA && timeB) {
+        return timeB - timeA;
+      }
+      
+      // Otherwise sort by key
+      return b[0].localeCompare(a[0]);
     });
 
+    // Limit to last 100 entries for performance
+    const displayEntries = filteredEntries.slice(0, 100);
 
-    filteredEntries.forEach(
+    if (displayEntries.length === 0) {
+      table.innerHTML = `
+        <tr>
+          <td colspan="4" style="text-align:center">
+            No logs available
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    displayEntries.forEach(
       ([key, log], index) => {
 
         if (
@@ -1072,11 +1163,30 @@
 
         }
 
-        // Format the time
-        const formattedTime = log.Time ? formatDate(log.Time) : "--";
+        // Format the time properly
+        const timeValue = log.Time || log.timestamp || null;
+        let formattedTime = "--";
+        let relativeTime = "";
+        let timeBadge = "";
 
-        // Also show relative time in a smaller font
-        const relativeTime = log.Time ? formatTimeAgo(log.Time) : "";
+        if (timeValue) {
+          formattedTime = formatLogTime(timeValue);
+          
+          // Only show relative time for actual timestamps (not ESP32 millis)
+          if (!isEsp32Millis(timeValue)) {
+            relativeTime = formatTimeAgo(timeValue);
+            if (relativeTime !== "--" && relativeTime !== "Just now") {
+              timeBadge = `<span class="time-badge">${relativeTime}</span>`;
+            }
+          }
+        }
+
+        // Store latest time for reference
+        if (timeValue && typeof timeValue === 'number' && !isEsp32Millis(timeValue)) {
+          if (timeValue > latestLogTime) {
+            latestLogTime = timeValue;
+          }
+        }
 
 
         row.innerHTML = `
@@ -1095,7 +1205,7 @@
 
           <td class="log-time">
             ${formattedTime}
-            ${relativeTime ? `<br><small style="color:#888;font-size:10px;">${relativeTime}</small>` : ''}
+            ${timeBadge ? `<br><span class="log-time-small">${timeBadge}</span>` : ''}
           </td>
 
         `;
@@ -1105,10 +1215,16 @@
           row
         );
 
-        updateLastUpdateTime();
-
       }
     );
+
+    // Update last action time if we have a valid timestamp
+    if (latestLogTime > 0) {
+      const lastActionTimeEl = document.getElementById("lastActionTime");
+      lastActionTimeEl.textContent = "Last log: " + formatDate(latestLogTime);
+    }
+
+    updateLastUpdateTime();
 
   }
 
@@ -1174,7 +1290,7 @@
           );
 
 
-          // Log the password change with proper timestamp
+          // Log the password change with server timestamp
           const newLogRef =
             push(
               ref(
@@ -1270,11 +1386,15 @@
           let lastAction = "";
 
           // Get current last action before clearing
-          await onValue(lastActionRef, (snapshot) => {
-            if (snapshot.val()) {
-              lastAction = snapshot.val();
-            }
-          }, { onlyOnce: true });
+          const snapshot = await new Promise((resolve) => {
+            onValue(lastActionRef, (snap) => {
+              resolve(snap);
+            }, { onlyOnce: true });
+          });
+
+          if (snapshot.val()) {
+            lastAction = snapshot.val();
+          }
 
           await remove(
             logsRef
