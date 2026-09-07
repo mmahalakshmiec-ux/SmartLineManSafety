@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Smart Line Man Safety System</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+    }
+
+    body {
+      background: #f2f4f7;
+      color: #222;
+    }
+
+    header {
+      background: #1b1f24;
+      color: white;
+      padding: 22px;
+      text-align: center;
+    }
+
+    header h1 {
+      font-size: 26px;
+    }
+
+    header p {
+      margin-top: 6px;
+      color: #ccc;
+    }
+
+    .container {
+      width: 95%;
+      max-width: 1100px;
+      margin: 25px auto;
+    }
+
+    .connection {
+      padding: 14px;
+      background: white;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    .online {
+      color: green;
+      font-weight: bold;
+    }
+
+    .offline {
+      color: red;
+      font-weight: bold;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      background: white;
+      padding: 25px;
+      border-radius: 14px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.10);
+      text-align: center;
+    }
+
+    .card h2 {
+      font-size: 18px;
+      margin-bottom: 15px;
+    }
+
+    .status {
+      font-size: 30px;
+      font-weight: bold;
+      margin: 15px 0;
+    }
+
+    .on {
+      color: green;
+    }
+
+    .off {
+      color: red;
+    }
+
+    .locked {
+      color: red;
+    }
+
+    .unlocked {
+      color: green;
+    }
+
+    .warning {
+      color: orange;
+    }
+
+    .log {
+      margin-top: 20px;
+      background: white;
+      padding: 25px;
+      border-radius: 14px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.10);
+    }
+
+    .log h2 {
+      margin-bottom: 15px;
+    }
+
+    #lastAction {
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    #timestamp {
+      margin-top: 10px;
+      color: #666;
+    }
+
+    footer {
+      text-align: center;
+      padding: 25px;
+      color: #777;
+    }
+  </style>
+</head>
+
+<body>
+
+<header>
+  <h1>SMART LINE MAN SAFETY SYSTEM</h1>
+  <p>Password Based Circuit Breaker</p>
+</header>
+
+
+<div class="container">
+
+  <!-- CONNECTION -->
+
+  <div class="connection">
+
+    Firebase Connection:
+
+    <span id="connectionStatus" class="offline">
+      Connecting...
+    </span>
+
+  </div>
+
+
+  <!-- STATUS CARDS -->
+
+  <div class="grid">
+
+
+    <!-- RELAY -->
+
+    <div class="card">
+
+      <h2>RELAY STATUS</h2>
+
+      <div
+        id="relayStatus"
+        class="status off"
+      >
+        OFF
+      </div>
+
+    </div>
+
+
+    <!-- SYSTEM -->
+
+    <div class="card">
+
+      <h2>SYSTEM STATUS</h2>
+
+      <div
+        id="systemStatus"
+        class="status unlocked"
+      >
+        UNLOCKED
+      </div>
+
+    </div>
+
+
+    <!-- WRONG ATTEMPTS -->
+
+    <div class="card">
+
+      <h2>WRONG ATTEMPTS</h2>
+
+      <div
+        id="wrongAttempts"
+        class="status"
+      >
+        0 / 3
+      </div>
+
+    </div>
+
+
+    <!-- BUZZER -->
+
+    <div class="card">
+
+      <h2>BUZZER / ALERT</h2>
+
+      <div
+        id="buzzerStatus"
+        class="status off"
+      >
+        OFF
+      </div>
+
+    </div>
+
+  </div>
+
+
+  <!-- LAST ACTION -->
+
+  <div class="log">
+
+    <h2>LAST SYSTEM ACTION</h2>
+
+    <div id="lastAction">
+      Waiting...
+    </div>
+
+    <div id="timestamp">
+      Timestamp: --
+    </div>
+
+  </div>
+
+</div>
+
+
+<footer>
+
+  ESP32 + Firebase
+  <br>
+  Smart Line Man Safety System
+
+</footer>
+
+
+<!-- ================================================= -->
+<!--              FIREBASE JAVASCRIPT                  -->
+<!-- ================================================= -->
+
+<script type="module">
+
+  import {
+    initializeApp
+  }
+  from
+  "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
+
+
+  import {
+    getDatabase,
+    ref,
+    onValue
+  }
+  from
+  "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
+
+
+  // =================================================
+  // FIREBASE CONFIGURATION
+  // =================================================
+
+  const firebaseConfig = {
+
+    apiKey:
+      "AIzaSyCWn_nhG_SdBXwT5wZEfKqGfRAkNKJUkBQ",
+
+    authDomain:
+      "smartlinemansafety.firebaseapp.com",
+
+    databaseURL:
+      "https://smartlinemansafety-default-rtdb.asia-southeast1.firebasedatabase.app",
+
+    projectId:
+      "smartlinemansafety",
+
+    storageBucket:
+      "smartlinemansafety.firebasestorage.app",
+
+    messagingSenderId:
+      "73264154241",
+
+    appId:
+      "1:73264154241:web:1ee9af078631af8b5aef80",
+
+    measurementId:
+      "G-169QY494GH"
+
+  };
+
+
+  // =================================================
+  // INITIALIZE FIREBASE
+  // =================================================
+
+  const app =
+    initializeApp(firebaseConfig);
+
+
+  const database =
+    getDatabase(app);
+
+
+  // =================================================
+  // CONNECTION STATUS
+  // =================================================
+
+  const connectedRef =
+    ref(database, ".info/connected");
+
+
+  onValue(
+    connectedRef,
+    (snapshot) => {
+
+      const status =
+        document.getElementById(
+          "connectionStatus"
+        );
+
+
+      if (snapshot.val() === true) {
+
+        status.innerText =
+          "ONLINE";
+
+        status.className =
+          "online";
+
+      }
+
+      else {
+
+        status.innerText =
+          "OFFLINE";
+
+        status.className =
+          "offline";
+
+      }
+
+    }
+  );
+
+
+  // =================================================
+  // RELAY STATUS
+  // =================================================
+
+  const relayRef =
+    ref(database, "Relay/Status");
+
+
+  onValue(
+    relayRef,
+    (snapshot) => {
+
+      const value =
+        snapshot.val();
+
+
+      const element =
+        document.getElementById(
+          "relayStatus"
+        );
+
+
+      if (value == 1) {
+
+        element.innerText =
+          "ON";
+
+        element.className =
+          "status on";
+
+      }
+
+      else {
+
+        element.innerText =
+          "OFF";
+
+        element.className =
+          "status off";
+
+      }
+
+    }
+  );
+
+
+  // =================================================
+  // SYSTEM LOCK STATUS
+  // =================================================
+
+  const lockRef =
+    ref(database, "System/Locked");
+
+
+  onValue(
+    lockRef,
+    (snapshot) => {
+
+      const value =
+        snapshot.val();
+
+
+      const element =
+        document.getElementById(
+          "systemStatus"
+        );
+
+
+      if (value == 1) {
+
+        element.innerText =
+          "LOCKED";
+
+        element.className =
+          "status locked";
+
+      }
+
+      else {
+
+        element.innerText =
+          "UNLOCKED";
+
+        element.className =
+          "status unlocked";
+
+      }
+
+    }
+  );
+
+
+  // =================================================
+  // WRONG ATTEMPTS
+  // =================================================
+
+  const attemptsRef =
+    ref(database, "System/WrongAttempts");
+
+
+  onValue(
+    attemptsRef,
+    (snapshot) => {
+
+      let value =
+        snapshot.val();
+
+
+      if (value === null) {
+
+        value = 0;
+
+      }
+
+
+      document.getElementById(
+        "wrongAttempts"
+      ).innerText =
+        value + " / 3";
+
+    }
+  );
+
+
+  // =================================================
+  // BUZZER STATUS
+  // =================================================
+
+  const buzzerRef =
+    ref(database, "Alert/Buzzer");
+
+
+  onValue(
+    buzzerRef,
+    (snapshot) => {
+
+      const value =
+        snapshot.val();
+
+
+      const element =
+        document.getElementById(
+          "buzzerStatus"
+        );
+
+
+      if (value == 1) {
+
+        element.innerText =
+          "ACTIVE";
+
+        element.className =
+          "status warning";
+
+      }
+
+      else {
+
+        element.innerText =
+          "OFF";
+
+        element.className =
+          "status off";
+
+      }
+
+    }
+  );
+
+
+  // =================================================
+  // LAST ACTION
+  // =================================================
+
+  const actionRef =
+    ref(database, "Logs/LastAction");
+
+
+  onValue(
+    actionRef,
+    (snapshot) => {
+
+      const value =
+        snapshot.val();
+
+
+      if (value) {
+
+        document.getElementById(
+          "lastAction"
+        ).innerText =
+          value;
+
+      }
+
+    }
+  );
+
+
+  // =================================================
+  // TIMESTAMP
+  // =================================================
+
+  const timestampRef =
+    ref(database, "Logs/Timestamp");
+
+
+  onValue(
+    timestampRef,
+    (snapshot) => {
+
+      const value =
+        snapshot.val();
+
+
+      if (value) {
+
+        document.getElementById(
+          "timestamp"
+        ).innerText =
+          "Timestamp: " + value;
+
+      }
+
+    }
+  );
+
+</script>
+
+</body>
+</html>
